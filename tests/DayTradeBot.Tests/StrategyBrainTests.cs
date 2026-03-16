@@ -74,7 +74,7 @@ public class MockIndicatorEngine : IndicatorEngine
     public MockIndicatorEngine(double adx, double bbLower, double rsi)
         => (_adx, _bbLower, _rsi) = (adx, bbLower, rsi);
 
-    public new IndicatorResult? Calculate(IReadOnlyList<KLine> _)
+    public override IndicatorResult? Calculate(IReadOnlyList<KLine> _)
         => new(_adx, _bbLower, _rsi);
 }
 

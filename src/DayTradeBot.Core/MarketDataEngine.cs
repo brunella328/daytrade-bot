@@ -26,13 +26,17 @@ public class MarketDataEngine
 
     private async Task ConsumeLoop()
     {
-        while (!_ct.IsCancellationRequested)
+        try
         {
-            while (_tickQueue.TryDequeue(out var tick))
-                ProcessTick(tick);
+            while (!_ct.IsCancellationRequested)
+            {
+                while (_tickQueue.TryDequeue(out var tick))
+                    ProcessTick(tick);
 
-            await Task.Delay(10, _ct).ConfigureAwait(false);
+                await Task.Delay(10, _ct).ConfigureAwait(false);
+            }
         }
+        catch (OperationCanceledException) { }
 
         // 排空剩餘 Tick
         while (_tickQueue.TryDequeue(out var tick))

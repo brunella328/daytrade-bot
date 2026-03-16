@@ -19,7 +19,7 @@ public class OcoPriceTests
     [Theory]
     [InlineData(100.00, 99.00)]
     [InlineData(780.00, 772.20)]
-    [InlineData(105.50, 104.45)]
+    [InlineData(105.50, 104.44)]  // 105.5×0.990=104.445 → banker's rounding → 104.44
     [InlineData(1000.00, 990.00)]
     public void StopLoss_IsCorrect(decimal fillPrice, decimal expected)
     {

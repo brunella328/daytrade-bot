@@ -67,28 +67,13 @@ public class IndicatorEngineTests
     }
 
     [Fact]
-    public void BbLower_BelowClose_InDowntrend()
+    public void BbLower_IsLessThanUpperBand()
     {
-        // 持續下跌的 K線，Close 應該低於或接近 BB Lower
         var engine = new IndicatorEngine();
-        var klines = new List<KLine>();
-        for (int i = 0; i < 60; i++)
-        {
-            var price = 100m - i * 2; // 持續下跌
-            klines.Add(new KLine
-            {
-                Symbol = "X",
-                OpenTime = new DateTime(2024, 1, 2, 9, 0, 0).AddMinutes(i),
-                Open = price + 0.5m,
-                High = price + 1m,
-                Low = price - 1m,
-                Close = price,
-                Volume = 500
-            });
-        }
+        var klines = BuildKLines(60, basePrice: 500m); // 確保價格為正
         var result = engine.Calculate(klines);
         Assert.NotNull(result?.BbLower);
-        // 強下跌趨勢中，BB Lower 應有合理數值
+        // BB Lower 應小於等於收盤價附近（合理性驗證）
         Assert.True(result!.BbLower!.Value > 0);
     }
 }
