@@ -26,17 +26,28 @@ public class TradeRepository
                 Qty         INTEGER NOT NULL,
                 EntryTime   TEXT    NOT NULL,
                 ExitTime    TEXT    NOT NULL,
-                PnL         REAL    NOT NULL,
+                GrossPnL    REAL    NOT NULL DEFAULT 0,
+                Commission  REAL    NOT NULL DEFAULT 0,
+                Tax         REAL    NOT NULL DEFAULT 0,
+                NetPnL      REAL    NOT NULL DEFAULT 0,
                 ExitReason  TEXT    NOT NULL
             )");
+
+        // 舊版 schema 升級（若已有 PnL 欄位但無 NetPnL）
+        try { conn.Execute("ALTER TABLE Trades ADD COLUMN GrossPnL REAL NOT NULL DEFAULT 0"); } catch { }
+        try { conn.Execute("ALTER TABLE Trades ADD COLUMN Commission REAL NOT NULL DEFAULT 0"); } catch { }
+        try { conn.Execute("ALTER TABLE Trades ADD COLUMN Tax REAL NOT NULL DEFAULT 0"); } catch { }
+        try { conn.Execute("ALTER TABLE Trades ADD COLUMN NetPnL REAL NOT NULL DEFAULT 0"); } catch { }
     }
 
     public async Task InsertTradeAsync(TradeRecord trade)
     {
         using var conn = new SqliteConnection(_connectionString);
         await conn.ExecuteAsync(@"
-            INSERT INTO Trades (Symbol, EntryPrice, ExitPrice, Qty, EntryTime, ExitTime, PnL, ExitReason)
-            VALUES (@Symbol, @EntryPrice, @ExitPrice, @Qty, @EntryTime, @ExitTime, @PnL, @ExitReason)",
+            INSERT INTO Trades (Symbol, EntryPrice, ExitPrice, Qty, EntryTime, ExitTime,
+                                GrossPnL, Commission, Tax, NetPnL, ExitReason)
+            VALUES (@Symbol, @EntryPrice, @ExitPrice, @Qty, @EntryTime, @ExitTime,
+                    @GrossPnL, @Commission, @Tax, @NetPnL, @ExitReason)",
             trade);
     }
 
@@ -55,8 +66,8 @@ public class TradeRepository
         if (trades.Count == 0)
             return new TradeStats(0, 0, 0, 0);
 
-        var wins = trades.Count(t => t.PnL > 0);
-        var totalPnL = trades.Sum(t => t.PnL);
+        var wins = trades.Count(t => t.NetPnL > 0);
+        var totalPnL = trades.Sum(t => t.NetPnL);
         var avgPnL = totalPnL / trades.Count;
         var winRate = (double)wins / trades.Count;
 

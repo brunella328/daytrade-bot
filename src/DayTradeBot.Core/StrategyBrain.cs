@@ -77,14 +77,17 @@ public class StrategyBrain
         if (adxOk && bbOk && rsiOk)
         {
             Console.WriteLine($"[SIGNAL] {kline.Symbol} ADX={result.Adx:F1} BB={result.BbLower:F2} RSI={result.Rsi:F1} Close={kline.Close}");
-            // 暫存 K線收盤價，在 HandleTradeReport 裡用作成交價（Mock 環境）
+            // 暫存成交價與前收盤，供 HandleTradeReport 使用
             _pendingFillPrice[kline.Symbol] = kline.Close;
+            if (kline.PreviousClose.HasValue)
+                _pendingPreviousClose[kline.Symbol] = kline.PreviousClose.Value;
             await _broker.PlaceMarketBuyAsync(kline.Symbol, DefaultQty);
         }
     }
 
-    // Mock 環境用：暫存預期成交價
+    // Mock 環境用：暫存預期成交價 & 前收盤
     private readonly Dictionary<string, decimal> _pendingFillPrice = new();
+    private readonly Dictionary<string, decimal> _pendingPreviousClose = new();
 
     private void HandleTradeReport(object? sender, TradeReport report)
     {
@@ -95,8 +98,23 @@ public class StrategyBrain
 
         _pendingFillPrice.Remove(report.Symbol);
 
-        var tp = Math.Round(fillPrice * 1.005m, 2);
-        var sl = Math.Round(fillPrice * 0.990m, 2);
+        // 計算原始 TP/SL
+        var tp = CalculateTakeProfit(fillPrice);
+        var sl = CalculateStopLoss(fillPrice);
+
+        // 套用 Tick Size rounding
+        tp = TickSizeHelper.RoundToTickSize(tp);
+        sl = TickSizeHelper.RoundToTickSize(sl);
+
+        // 漲跌停 guard（有 PreviousClose 時才檢查）
+        if (_pendingPreviousClose.TryGetValue(report.Symbol, out var prevClose) && prevClose > 0)
+        {
+            var upperLimit = TickSizeHelper.UpperLimit(prevClose);
+            var lowerLimit = TickSizeHelper.LowerLimit(prevClose);
+            tp = Math.Min(tp, upperLimit);
+            sl = Math.Max(sl, lowerLimit);
+            _pendingPreviousClose.Remove(report.Symbol);
+        }
 
         var oco = new OcoOrder(report.Symbol, report.OrderId, fillPrice, tp, sl, report.Qty, report.FilledAt);
         _openPositions[report.Symbol] = oco;

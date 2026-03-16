@@ -49,7 +49,9 @@
         <th>進場價</th>
         <th>出場價</th>
         <th>數量</th>
-        <th>PnL</th>
+        <th>稅前損益</th>
+        <th>手續費+稅</th>
+        <th>淨損益</th>
         <th>出場原因</th>
         <th>進場時間</th>
         <th>出場時間</th>
@@ -81,17 +83,24 @@
         if (!trades || trades.length === 0) {
           tbody.innerHTML = '<tr><td colspan="8" class="empty">尚無交易紀錄</td></tr>';
         } else {
-          tbody.innerHTML = trades.map(t => `
+          tbody.innerHTML = trades.map(t => {
+            const gross = t.grossPnL ?? t.pnL ?? 0;
+            const cost = ((t.commission ?? 0) + (t.tax ?? 0));
+            const net = t.netPnL ?? t.pnL ?? 0;
+            return `
             <tr>
               <td><strong>${t.symbol}</strong></td>
               <td>${t.entryPrice.toFixed(2)}</td>
               <td>${t.exitPrice.toFixed(2)}</td>
               <td>${t.qty}</td>
-              <td class="${t.pnL >= 0 ? 'positive' : 'negative'}">${t.pnL >= 0 ? '+' : ''}${t.pnL.toFixed(2)}</td>
+              <td class="${gross >= 0 ? 'positive' : 'negative'}">${gross >= 0 ? '+' : ''}${gross.toFixed(2)}</td>
+              <td class="negative">-${cost.toFixed(2)}</td>
+              <td class="${net >= 0 ? 'positive' : 'negative'}">${net >= 0 ? '+' : ''}${net.toFixed(2)}</td>
               <td class="exit-${t.exitReason === 'TP' ? 'tp' : t.exitReason === 'SL' ? 'sl' : 'force'}">${t.exitReason}</td>
               <td>${fmtTime(t.entryTime)}</td>
               <td>${fmtTime(t.exitTime)}</td>
-            </tr>`).join('');
+            </tr>`;
+          }).join('');
         }
 
         document.getElementById('last-update').textContent = '最後更新：' + new Date().toLocaleTimeString('zh-TW');

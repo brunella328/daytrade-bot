@@ -7,6 +7,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // DI 註冊
 var dbPath = builder.Configuration["DbPath"] ?? "data/trades.db";
+var tradingConfig = builder.Configuration.GetSection("TradingConfig").Get<TradingConfig>() ?? new TradingConfig();
+builder.Services.AddSingleton(tradingConfig);
 
 builder.Services.AddSingleton<MarketDataEngine>();
 builder.Services.AddSingleton<IndicatorEngine>();
