@@ -1,0 +1,21 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.nupkg
+.nuget/
+
+## Data
+data/
+*.db
+*.db-shm
+*.db-wal
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Secrets
+appsettings.Production.json
