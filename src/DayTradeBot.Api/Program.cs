@@ -5,30 +5,63 @@ using DayTradeBot.Api;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// DI 註冊
 var dbPath = builder.Configuration["DbPath"] ?? "data/trades.db";
 var tradingConfig = builder.Configuration.GetSection("TradingConfig").Get<TradingConfig>() ?? new TradingConfig();
 builder.Services.AddSingleton(tradingConfig);
 
+// 讀取 watchlist
+var watchlistPath = builder.Configuration["WatchlistPath"] ?? "watchlist.json";
+var watchlist = File.Exists(watchlistPath)
+    ? System.Text.Json.JsonSerializer.Deserialize<string[]>(File.ReadAllText(watchlistPath)) ?? []
+    : new[] { "2330", "2317", "2454" };
+builder.Services.AddSingleton<IEnumerable<string>>(watchlist);
+
+// 核心引擎
 builder.Services.AddSingleton<MarketDataEngine>();
 builder.Services.AddSingleton<IndicatorEngine>();
-builder.Services.AddSingleton<IBrokerApi, MockBrokerApi>();
+builder.Services.AddSingleton(_ => new TradeRepository(dbPath));
+
+if (tradingConfig.IsLive)
+{
+    // ── Live 模式：Fugle API ─────────────────────────────────────────
+    var fugleConfig = builder.Configuration.GetSection("Fugle").Get<DayTradeBot.Fugle.FugleConfig>()
+        ?? throw new InvalidOperationException("Live 模式需設定 Fugle ApiKey");
+
+    builder.Services.AddSingleton(fugleConfig);
+    builder.Services.AddSingleton<IBrokerApi, DayTradeBot.Fugle.FugleTradeWrapper>();
+    builder.Services.AddHostedService<DayTradeBot.Fugle.FugleMarketDataWrapper>();
+}
+else
+{
+    // ── DryRun 模式：Mock ────────────────────────────────────────────
+    builder.Services.AddSingleton<IBrokerApi, MockBrokerApi>();
+    builder.Services.AddHostedService<MockTickProducer>();
+}
+
+// LocalRiskManager + StrategyBrain（兩種模式都需要）
+builder.Services.AddSingleton<LocalRiskManager>();
 builder.Services.AddSingleton<StrategyBrain>(sp =>
     new StrategyBrain(
         sp.GetRequiredService<IBrokerApi>(),
         sp.GetRequiredService<IndicatorEngine>()
     ));
-builder.Services.AddSingleton(_ => new TradeRepository(dbPath));
 
-// Background services
 builder.Services.AddHostedService<TradingEngine>();
-builder.Services.AddHostedService<MockTickProducer>();
 
-// CORS（Dashboard 用）
 builder.Services.AddCors(opt =>
     opt.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
 
 var app = builder.Build();
+
+// Live 模式：把 LocalRiskManager 掛上報價事件
+if (tradingConfig.IsLive)
+{
+    // FugleMarketDataWrapper 啟動後會觸發 OnTickReceived
+    // 在此訂閱（BackgroundService 啟動前需先取得 singleton）
+    var riskMgr = app.Services.GetRequiredService<LocalRiskManager>();
+    // 注意：FugleMarketDataWrapper 在 BackgroundService 中觸發事件，
+    // 需在 TradingEngine 啟動時連接（見 TradingEngine.cs）
+}
 
 app.UseCors();
 app.UseDefaultFiles();
@@ -36,20 +69,15 @@ app.UseStaticFiles();
 
 // ── API Endpoints ──────────────────────────────────────
 app.MapGet("/api/trades", async (TradeRepository repo) =>
-{
-    var trades = await repo.GetAllTradesAsync();
-    return Results.Ok(trades);
-});
+    Results.Ok(await repo.GetAllTradesAsync()));
 
 app.MapGet("/api/stats", async (TradeRepository repo) =>
-{
-    var stats = await repo.GetStatsAsync();
-    return Results.Ok(stats);
-});
+    Results.Ok(await repo.GetStatsAsync()));
 
-app.MapGet("/api/health", () => Results.Ok(new { status = "ok", mode = "DryRun", time = DateTime.Now }));
+app.MapGet("/api/health", (TradingConfig cfg) =>
+    Results.Ok(new { status = "ok", mode = cfg.Mode, time = DateTime.Now }));
 
-// Debug endpoint：注入假交易，驗證 Dashboard 顯示正確（僅 DryRun 模式可用）
+// Debug：注入假交易（僅 DryRun）
 app.MapPost("/api/debug/inject-trade", async (TradeRepository repo, TradingConfig config) =>
 {
     if (config.IsLive) return Results.Forbid();

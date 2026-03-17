@@ -36,6 +36,14 @@ public class MockBrokerApi : IBrokerApi
         return Task.FromResult(new OcoOrderResult(tpId, slId));
     }
 
+    public async Task<string> PlaceMarketSellAsync(string symbol, long qty)
+    {
+        var orderId = "SELL_" + Guid.NewGuid().ToString("N")[..8];
+        Console.WriteLine($"[MOCK] SELL {symbol} qty={qty} orderId={orderId}");
+        await Task.Delay(100);
+        return orderId;
+    }
+
     public Task CancelOrderAsync(string orderId)
     {
         _pendingOco.Remove(orderId);

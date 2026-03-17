@@ -15,6 +15,9 @@ public interface IBrokerApi
     /// <summary>送出市價買單，回傳 OrderId</summary>
     Task<string> PlaceMarketBuyAsync(string symbol, long qty);
 
+    /// <summary>送出市價賣單（平倉用，供 LocalRiskManager 呼叫）</summary>
+    Task<string> PlaceMarketSellAsync(string symbol, long qty);
+
     /// <summary>送出 OCO 賣單（停利 + 停損二擇一）</summary>
     Task<OcoOrderResult> PlaceOcoOrderAsync(string symbol, long qty, decimal takeProfitPrice, decimal stopLossPrice);
 

@@ -9,7 +9,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DayTradeBot.Storage", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DayTradeBot.Api", "src\DayTradeBot.Api\DayTradeBot.Api.csproj", "{A1B2C3D4-0001-0001-0001-000000000003}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DayTradeBot.Capital", "src\DayTradeBot.Capital\DayTradeBot.Capital.csproj", "{A1B2C3D4-0001-0001-0001-000000000005}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DayTradeBot.Fugle", "src\DayTradeBot.Fugle\DayTradeBot.Fugle.csproj", "{A1B2C3D4-0001-0001-0001-000000000005}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DayTradeBot.Tests", "tests\DayTradeBot.Tests\DayTradeBot.Tests.csproj", "{A1B2C3D4-0001-0001-0001-000000000004}"
 EndProject
