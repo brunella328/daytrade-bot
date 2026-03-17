@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      群益 Capital API 是 COM x64 元件，必須強制 x64。
+      Any CPU 或 x86 會導致 BadImageFormatException。
+    -->
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DayTradeBot.Core\DayTradeBot.Core.csproj" />
+    <!--
+      正式使用時，在此加入群益 COM DLL 參考：
+      <COMReference Include="SKCenterLib">
+        <Guid>{...}</Guid>
+        <VersionMajor>1</VersionMajor>
+        <VersionMinor>0</VersionMinor>
+        <Lcid>0</Lcid>
+        <WrapperTool>tlbimp</WrapperTool>
+        <Isolated>false</Isolated>
+        <EmbedInteropTypes>true</EmbedInteropTypes>
+      </COMReference>
+      依此類推：SKQuoteLib、SKOrderLib
+    -->
+  </ItemGroup>
+</Project>

@@ -53,6 +53,29 @@ dotnet test
 }
 ```
 
+## Live 模式（群益 Capital API）
+
+> ⚠️ Live 模式僅支援 **Windows x64**，需要群益 API DLL 已安裝並完成 COM 註冊。
+
+### 前置條件
+1. 安裝群益 API（SKCenterLib、SKQuoteLib、SKOrderLib）
+2. 填入 `appsettings.json`：
+```json
+"TradingConfig": { "Mode": "Live" },
+"Capital": { "Account": "你的帳號", "Password": "你的密碼" }
+```
+3. 群益 API 目前架構在 `src/DayTradeBot.Capital/`：
+   - `CapitalApiManager`：SKCenterLib 登入
+   - `SKQuoteWrapper`：報價訂閱（OnNotifyTicks）
+   - `SKOrderWrapper`：下單 + 成交回報 + OCO 智慧單
+
+### 三大地雷（已預防）
+| 地雷 | 處理方式 |
+|------|---------|
+| BadImageFormatException（位元衝突） | `DayTradeBot.Capital.csproj` 強制 `PlatformTarget=x64` |
+| COM STA Thread 異常 | `CapitalApiManager` 標注 STA Thread 要求，主執行緒需 `[STAThread]` |
+| Big5 亂碼 | `CapitalApiManager.Initialize()` 自動呼叫 `Encoding.RegisterProvider(...)` |
+
 ## 架構
 
 ```
