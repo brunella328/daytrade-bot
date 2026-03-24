@@ -20,6 +20,7 @@ public class FugleMarketDataWrapper : BackgroundService
     private readonly MarketDataEngine _engine;
     private readonly FugleConfig _config;
     private readonly WatchlistManager _watchlist;
+    private readonly StrategyBrain _brain;
     private readonly ILogger<FugleMarketDataWrapper> _logger;
 
     private static readonly Uri StreamingUri =
@@ -34,11 +35,13 @@ public class FugleMarketDataWrapper : BackgroundService
         MarketDataEngine engine,
         FugleConfig config,
         WatchlistManager watchlist,
+        StrategyBrain brain,
         ILogger<FugleMarketDataWrapper> logger)
     {
         _engine    = engine;
         _config    = config;
         _watchlist = watchlist;
+        _brain     = brain;
         _logger    = logger;
 
         _restClient = new HttpClient
@@ -149,6 +152,9 @@ public class FugleMarketDataWrapper : BackgroundService
     /// </summary>
     private async Task FetchReferencePricesAsync(IReadOnlyList<string> symbols, CancellationToken ct)
     {
+        // 查詢大盤（TWII = "0001"）計算今日跌幅，設定到 StrategyBrain
+        await FetchTwiiDropPctAsync(ct);
+
         foreach (var symbol in symbols)
         {
             try
@@ -174,6 +180,33 @@ public class FugleMarketDataWrapper : BackgroundService
             {
                 _logger.LogDebug("[Fugle] Snapshot {Symbol} 例外：{Msg}", symbol, ex.Message);
             }
+        }
+    }
+
+    private async Task FetchTwiiDropPctAsync(CancellationToken ct)
+    {
+        try
+        {
+            var resp = await _restClient.GetAsync("intraday/quote/0001", ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("[Fugle] TWII Snapshot 失敗：{Code}", resp.StatusCode);
+                return;
+            }
+
+            var quote = await resp.Content.ReadFromJsonAsync<FugleQuoteResponse>(cancellationToken: ct);
+            var prevClose = quote?.ReferencePrice ?? quote?.PreviousClose ?? 0m;
+            var lastPrice = quote?.LastPrice ?? 0m;
+
+            if (prevClose > 0 && lastPrice > 0)
+            {
+                _brain.TwiiDropPct = (lastPrice - prevClose) / prevClose;
+                _logger.LogInformation("[Fugle] TWII 跌幅 = {Pct:P2}", _brain.TwiiDropPct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("[Fugle] TWII Snapshot 例外：{Msg}", ex.Message);
         }
     }
 
@@ -260,6 +293,7 @@ public class FugleQuoteResponse
 {
     [JsonPropertyName("referencePrice")] public decimal? ReferencePrice { get; set; }
     [JsonPropertyName("previousClose")]  public decimal? PreviousClose  { get; set; }
+    [JsonPropertyName("lastPrice")]      public decimal? LastPrice      { get; set; }
     [JsonPropertyName("limitUpPrice")]   public decimal? LimitUpPrice   { get; set; }
     [JsonPropertyName("limitDownPrice")] public decimal? LimitDownPrice { get; set; }
     [JsonPropertyName("symbol")]         public string?  Symbol         { get; set; }

@@ -25,8 +25,13 @@ public class StrategyBrain
     private readonly IndicatorEngine _indicators;
     private readonly Dictionary<string, List<KLine>> _klineHistory = new();
     private readonly Dictionary<string, OcoOrder> _openPositions = new();
+    private bool _forceCloseSent = false;
+    private readonly Dictionary<string, double?> _prevRsi = new();
 
     public StrategyConfig Config { get; } = new();
+
+    /// <summary>今日大盤（TWII）漲跌幅，由外部注入（DryRun 模式預設 0）</summary>
+    public decimal TwiiDropPct { get; set; } = 0m;
 
     public event EventHandler<OcoOrder>? OnPositionOpened;
     public event EventHandler<(OcoOrder Order, decimal ExitPrice, string Reason)>? OnPositionClosed;
@@ -46,6 +51,8 @@ public class StrategyBrain
         if (now.TimeOfDay >= TimeSpan.FromHours(Config.EntryEndHour) &&
             now.TimeOfDay < TimeSpan.FromHours(Config.ForceCloseHour))
         {
+            if (_forceCloseSent) return;
+            _forceCloseSent = true;
             await ForceCloseAllAsync();
             return;
         }
@@ -53,7 +60,18 @@ public class StrategyBrain
         // 允許進場時段
         if (now.TimeOfDay < TimeSpan.FromHours(Config.EntryStartHour) ||
             now.TimeOfDay >= TimeSpan.FromHours(Config.EntryEndHour))
+        {
+            if (now.TimeOfDay < TimeSpan.FromHours(Config.EntryStartHour) && _forceCloseSent)
+                _forceCloseSent = false;
             return;
+        }
+
+        // 大盤方向濾網
+        if (TwiiDropPct < Config.MarketDropThreshold)
+        {
+            Console.WriteLine($"[MARKET GUARD] 大盤跌幅 {TwiiDropPct:P2}，停止進場");
+            return;
+        }
 
         // 已有部位 → 不重複進場同標的
         if (_openPositions.ContainsKey(kline.Symbol)) return;
@@ -89,7 +107,10 @@ public class StrategyBrain
         bool adxOk = result.Adx.HasValue && result.Adx.Value < Config.AdxThreshold;
         bool bbOk  = !Config.UseBbCondition ||
                      (result.BbLower.HasValue && (double)kline.Close < result.BbLower.Value);
-        bool rsiOk = result.Rsi.HasValue && result.Rsi.Value < Config.RsiThreshold;
+        bool rsiThisBar = result.Rsi.HasValue && result.Rsi.Value < Config.RsiThreshold;
+        _prevRsi.TryGetValue(kline.Symbol, out var prevRsiVal);
+        bool rsiOk = rsiThisBar && prevRsiVal.HasValue && prevRsiVal.Value < Config.RsiThreshold;
+        _prevRsi[kline.Symbol] = result.Rsi;
 
         _lastIndicators[kline.Symbol] = new IndicatorSnapshot(
             kline.Symbol, kline.Close, kline.CloseTime,

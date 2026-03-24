@@ -12,10 +12,10 @@ public class OcoPriceTests
         new StrategyBrain(new MockBrokerApi(), new IndicatorEngine());
 
     [Theory]
-    [InlineData(100.00, 100.80)]   // 100.00 * 1.008 = 100.800 → 100.80
-    [InlineData(780.00, 786.24)]   // 780.00 * 1.008 = 786.240 → 786.24
-    [InlineData(105.50, 106.34)]   // 105.50 * 1.008 = 106.344 → 106.34
-    [InlineData(1000.00, 1008.00)] // 1000.00 * 1.008 = 1008.000 → 1008.00
+    [InlineData(100.00, 101.30)]   // 100.00 * 1.013 = 101.300 → 101.30
+    [InlineData(780.00, 790.14)]   // 780.00 * 1.013 = 790.140 → 790.14
+    [InlineData(105.50, 106.87)]   // 105.50 * 1.013 = 106.8715 → 106.87
+    [InlineData(1000.00, 1013.00)] // 1000.00 * 1.013 = 1013.000 → 1013.00
     public void TakeProfit_IsCorrect(decimal fillPrice, decimal expected)
     {
         var brain = CreateBrain();

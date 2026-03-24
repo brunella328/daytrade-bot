@@ -20,9 +20,9 @@ public class StockScreener
 
     private const int    MaxSubscriptions = 5;
     private const decimal MinPrice        = 50m;
-    private const decimal MaxPrice        = 3000m;
-    private const long   MinVolumeLots    = 3000;   // 張
-    private const double MinRangePct      = 1.0;    // 振幅 %
+    private const decimal MaxPrice        = 500m;
+    private const long   MinVolumeLots    = 5000;   // 張
+    private const double MinRangePct      = 1.5;    // 振幅 %
 
     public StockScreener(HttpClient http, string fugleApiKey, ILogger<StockScreener> logger)
     {
@@ -111,7 +111,7 @@ public class StockScreener
             // 正規化分數
             return rows
                 .Select(r => r with {
-                    LiquidityScore  = (double)r.VolumeLots / maxVol,
+                    LiquidityScore  = Math.Log10((double)r.VolumeLots + 1) / Math.Log10(maxVol + 1),
                     VolatilityScore = r.RangePct / maxRange
                 })
                 .ToList();

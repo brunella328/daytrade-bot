@@ -8,7 +8,7 @@ namespace DayTradeBot.Tests;
 public class StrategyBrainTests
 {
     [Theory]
-    [InlineData(24.9, 99.0, 95.0, 29.9, true)]   // 全中
+    [InlineData(24.9, 99.0, 95.0, 29.9, true)]   // 全中（2 根 RSI 連續確認）
     [InlineData(25.1, 99.0, 95.0, 29.9, false)]   // ADX 不符
     [InlineData(24.9, 99.0, 101.0, 29.9, false)]  // Close > BBLower
     [InlineData(24.9, 99.0, 95.0, 30.1, false)]   // RSI 不符
@@ -22,7 +22,8 @@ public class StrategyBrainTests
         var signalFired = false;
         brain.OnPositionOpened += (_, _) => signalFired = true;
 
-        var kline = new KLine
+        // 第一根：建立 _prevRsi，不觸發
+        var kline1 = new KLine
         {
             Symbol = "2330",
             Open = (decimal)closePrice,
@@ -33,8 +34,21 @@ public class StrategyBrainTests
             OpenTime = new DateTime(2024, 1, 2, 10, 0, 0),
             CloseTime = new DateTime(2024, 1, 2, 10, 0, 59)
         };
+        await brain.OnKLineClosedAsync(null, kline1);
 
-        await brain.OnKLineClosedAsync(null, kline);
+        // 第二根：RSI 連續 2 根確認，應觸發（或不觸發，視條件）
+        var kline2 = new KLine
+        {
+            Symbol = "2330",
+            Open = (decimal)closePrice,
+            High = (decimal)closePrice + 1,
+            Low = (decimal)closePrice - 1,
+            Close = (decimal)closePrice,
+            Volume = 500,
+            OpenTime = new DateTime(2024, 1, 2, 10, 1, 0),
+            CloseTime = new DateTime(2024, 1, 2, 10, 1, 59)
+        };
+        await brain.OnKLineClosedAsync(null, kline2);
         await Task.Delay(200);
 
         Assert.Equal(shouldTrigger, signalFired);

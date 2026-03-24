@@ -20,14 +20,17 @@ public class StrategyConfig
     /// </summary>
     public double RedZoneThreshold { get; set; } = 0.07;
 
-    /// <summary>停利比例（0.008 = 0.8%）</summary>
-    public decimal TakeProfitPct { get; set; } = 0.008m;
+    /// <summary>大盤跌幅門檻：跌幅超過此值時停止進場（-0.015 = -1.5%）</summary>
+    public decimal MarketDropThreshold { get; set; } = -0.015m;
+
+    /// <summary>停利比例（0.013 = 1.3%）</summary>
+    public decimal TakeProfitPct { get; set; } = 0.013m;
 
     /// <summary>停損比例（0.010 = 1.0%）</summary>
     public decimal StopLossPct { get; set; } = 0.010m;
 
-    /// <summary>允許進場的開始時間（24h，預設 9.25 = 09:15）</summary>
-    public double EntryStartHour { get; set; } = 9.25;
+    /// <summary>允許進場的開始時間（24h，預設 9.5 = 09:30）</summary>
+    public double EntryStartHour { get; set; } = 9.5;
 
     /// <summary>允許進場的結束時間（24h，預設 13）</summary>
     public double EntryEndHour { get; set; } = 13;
