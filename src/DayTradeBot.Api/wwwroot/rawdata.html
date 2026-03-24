@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>原始資料 — 當沖 Bot</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 24px; }
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; }
+    .nav { margin-bottom: 24px; }
+    .nav a { color: #63b3ed; text-decoration: none; font-size: 0.875rem; margin-right: 16px; }
+    .nav a:hover { text-decoration: underline; }
+    .subtitle { color: #718096; font-size: 0.85rem; margin-bottom: 24px; }
+
+    .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-btn { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+    .filter-btn.active { background: #3182ce; border-color: #3182ce; }
+    .filter-input { background: #1a1d27; border: 1px solid #2d3748; color: #e2e8f0; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; width: 100px; }
+    .badge-count { background: #2d3748; color: #a0aec0; font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; }
+
+    table { width: 100%; border-collapse: collapse; background: #1a1d27; border-radius: 12px; overflow: hidden; border: 1px solid #2d3748; }
+    thead { background: #2d3748; position: sticky; top: 0; }
+    th { padding: 10px 14px; text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #a0aec0; }
+    td { padding: 8px 14px; font-size: 0.8rem; border-top: 1px solid #1e2330; font-family: "SF Mono", "Fira Code", monospace; }
+    tr:hover td { background: #1e2330; }
+    .sym { font-weight: 700; color: #63b3ed; }
+    .price { color: #e2e8f0; }
+    .vol { color: #a0aec0; }
+    .time { color: #718096; font-size: 0.75rem; }
+    .empty { text-align: center; padding: 48px; color: #4a5568; }
+    .refresh-info { font-size: 0.75rem; color: #4a5568; margin-top: 12px; text-align: right; }
+
+    .live-dot { display: inline-block; width: 8px; height: 8px; background: #48bb78; border-radius: 50%; margin-right: 6px; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+    .stats-row { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+    .mini-card { background: #1a1d27; border: 1px solid #2d3748; border-radius: 8px; padding: 12px 18px; min-width: 120px; }
+    .mini-label { font-size: 0.7rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+    .mini-val { font-size: 1.2rem; font-weight: 700; color: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/">交易紀錄</a>
+    <a href="/rawdata.html">原始行情</a>
+    <a href="/paper.html">模擬後台</a>
+  </div>
+
+  <h1><span class="live-dot"></span>原始行情資料</h1>
+  <p class="subtitle" id="last-update">載入中...</p>
+
+  <div class="stats-row">
+    <div class="mini-card"><div class="mini-label">緩衝筆數</div><div class="mini-val" id="s-count">—</div></div>
+    <div class="mini-card"><div class="mini-label">標的數</div><div class="mini-val" id="s-symbols">—</div></div>
+    <div class="mini-card"><div class="mini-label">最新價（2330）</div><div class="mini-val" id="s-latest">—</div></div>
+  </div>
+
+  <div class="toolbar">
+    <span style="font-size:0.8rem;color:#718096">篩選標的：</span>
+    <input class="filter-input" id="sym-filter" placeholder="e.g. 2330" oninput="applyFilter()" />
+    <button class="filter-btn" onclick="clearFilter()">清除</button>
+    <span class="badge-count" id="row-count">0 筆</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>標的</th>
+        <th>成交價</th>
+        <th>成交量（股）</th>
+        <th>Tick 時間</th>
+        <th>接收時間</th>
+      </tr>
+    </thead>
+    <tbody id="ticks-body">
+      <tr><td colspan="6" class="empty">尚無資料（等待 tick...）</td></tr>
+    </tbody>
+  </table>
+  <p class="refresh-info">每 2 秒自動更新 · 最多顯示 500 筆（最新在上）</p>
+
+  <script>
+    let allTicks = [];
+    let filterSym = '';
+
+    async function load() {
+      try {
+        const res = await fetch('/api/raw-ticks');
+        allTicks = await res.json();
+        renderStats();
+        applyFilter();
+        document.getElementById('last-update').textContent =
+          '最後更新：' + new Date().toLocaleTimeString('zh-TW');
+      } catch (e) {
+        document.getElementById('last-update').textContent = '無法連線到後端';
+      }
+    }
+
+    function renderStats() {
+      document.getElementById('s-count').textContent = allTicks.length;
+      const syms = new Set(allTicks.map(t => t.symbol));
+      document.getElementById('s-symbols').textContent = syms.size;
+      const t2330 = allTicks.find(t => t.symbol === '2330');
+      document.getElementById('s-latest').textContent =
+        t2330 ? t2330.price.toFixed(2) : '—';
+    }
+
+    function applyFilter() {
+      filterSym = document.getElementById('sym-filter').value.trim().toUpperCase();
+      const rows = filterSym
+        ? allTicks.filter(t => t.symbol.includes(filterSym))
+        : allTicks;
+
+      document.getElementById('row-count').textContent = rows.length + ' 筆';
+
+      const tbody = document.getElementById('ticks-body');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty">尚無資料（等待 tick...）</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = rows.map((t, i) => `
+        <tr>
+          <td class="time">${i + 1}</td>
+          <td class="sym">${t.symbol}</td>
+          <td class="price">${t.price.toFixed(2)}</td>
+          <td class="vol">${t.volume.toLocaleString()}</td>
+          <td class="time">${fmtTime(t.timestamp)}</td>
+          <td class="time">${fmtTime(t.receivedAt)}</td>
+        </tr>`).join('');
+    }
+
+    function clearFilter() {
+      document.getElementById('sym-filter').value = '';
+      filterSym = '';
+      applyFilter();
+    }
+
+    function fmtTime(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return d.toLocaleDateString('zh-TW', { month:'2-digit', day:'2-digit' })
+        + ' ' + d.toLocaleTimeString('zh-TW', { hour12: false });
+    }
+
+    load();
+    setInterval(load, 2000);
+  </script>
+</body>
+</html>

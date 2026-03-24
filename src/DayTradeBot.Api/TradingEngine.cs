@@ -45,10 +45,10 @@ public class TradingEngine : BackgroundService
         // LocalRiskManager 出場 → 寫 DB
         _riskMgr.OnPositionExited += async (_, e) =>
         {
-            var gross = Math.Round((e.ExitPrice - e.EntryPrice) * e.Qty, 2);
-            var commission = Math.Round((e.EntryPrice + e.ExitPrice) * e.Qty * _config.CommissionRate, 2);
-            var tax = Math.Round(e.ExitPrice * e.Qty * _config.TaxRate, 2);
-            var netPnl = Math.Round(gross - commission - tax, 2);
+            var gross      = Math.Round((e.ExitPrice - e.EntryPrice) * e.Qty, 2);
+            var commission = _config.CalcCommission(e.EntryPrice, e.ExitPrice, e.Qty);
+            var tax        = _config.CalcTax(e.ExitPrice, e.Qty);
+            var netPnl     = Math.Round(gross - commission - tax, 2);
 
             await _repo.InsertTradeAsync(new TradeRecord
             {

@@ -26,8 +26,7 @@ public class StrategyBrain
     private readonly Dictionary<string, List<KLine>> _klineHistory = new();
     private readonly Dictionary<string, OcoOrder> _openPositions = new();
 
-    // 單筆下單固定張數（Phase 1 固定 1 張）
-    private const long DefaultQty = 1;
+    public StrategyConfig Config { get; } = new();
 
     public event EventHandler<OcoOrder>? OnPositionOpened;
     public event EventHandler<(OcoOrder Order, decimal ExitPrice, string Reason)>? OnPositionClosed;
@@ -43,19 +42,36 @@ public class StrategyBrain
     {
         var now = kline.CloseTime == default ? DateTime.Now : kline.CloseTime;
 
-        // 強制清倉期：13:00–13:30
-        if (now.TimeOfDay >= TimeSpan.FromHours(13) && now.TimeOfDay < TimeSpan.FromHours(13.5))
+        // 強制清倉期
+        if (now.TimeOfDay >= TimeSpan.FromHours(Config.EntryEndHour) &&
+            now.TimeOfDay < TimeSpan.FromHours(Config.ForceCloseHour))
         {
             await ForceCloseAllAsync();
             return;
         }
 
-        // 允許進場時段：09:00–13:00
-        if (now.TimeOfDay < TimeSpan.FromHours(9) || now.TimeOfDay >= TimeSpan.FromHours(13))
+        // 允許進場時段
+        if (now.TimeOfDay < TimeSpan.FromHours(Config.EntryStartHour) ||
+            now.TimeOfDay >= TimeSpan.FromHours(Config.EntryEndHour))
             return;
 
         // 已有部位 → 不重複進場同標的
         if (_openPositions.ContainsKey(kline.Symbol)) return;
+
+        // 全域持倉上限
+        if (_openPositions.Count >= Config.MaxConcurrentPositions) return;
+
+        // ── 深水區禁區 (Red Zone Guard) ─────────────────────────────────────
+        // 當前跌幅超過門檻時，不進場（防止跌停鎖死停損單）
+        if (kline.PreviousClose.HasValue && kline.PreviousClose.Value > 0)
+        {
+            var dropPct = (double)(kline.Close - kline.PreviousClose.Value) / (double)kline.PreviousClose.Value;
+            if (dropPct <= -Config.RedZoneThreshold)
+            {
+                Console.WriteLine($"[RED ZONE] {kline.Symbol} 跌幅={dropPct:P2}，超過 {Config.RedZoneThreshold:P0} 門檻，禁止進場");
+                return;
+            }
+        }
 
         // 累積 K線歷史
         if (!_klineHistory.TryGetValue(kline.Symbol, out var history))
@@ -70,24 +86,42 @@ public class StrategyBrain
         if (result is null) return;
 
         // Triple Confirmation
-        bool adxOk = result.Adx.HasValue && result.Adx.Value < 25;
-        bool bbOk = result.BbLower.HasValue && (double)kline.Close < result.BbLower.Value;
-        bool rsiOk = result.Rsi.HasValue && result.Rsi.Value < 30;
+        bool adxOk = result.Adx.HasValue && result.Adx.Value < Config.AdxThreshold;
+        bool bbOk  = !Config.UseBbCondition ||
+                     (result.BbLower.HasValue && (double)kline.Close < result.BbLower.Value);
+        bool rsiOk = result.Rsi.HasValue && result.Rsi.Value < Config.RsiThreshold;
+
+        _lastIndicators[kline.Symbol] = new IndicatorSnapshot(
+            kline.Symbol, kline.Close, kline.CloseTime,
+            result.Adx, result.BbLower, result.Rsi,
+            adxOk, bbOk, rsiOk);
 
         if (adxOk && bbOk && rsiOk)
         {
-            Console.WriteLine($"[SIGNAL] {kline.Symbol} ADX={result.Adx:F1} BB={result.BbLower:F2} RSI={result.Rsi:F1} Close={kline.Close}");
-            // 暫存成交價與前收盤，供 HandleTradeReport 使用
+            // 部位規模：計算張數，不足 1 張則跳過
+            var lots = Config.CalcLots(kline.Close);
+            if (lots < 1)
+            {
+                Console.WriteLine($"[SKIP] {kline.Symbol} 價格={kline.Close} 資金不足 1 張（需 {kline.Close * 1000:N0} 元）");
+                return;
+            }
+            var qtyShares = lots * 1000; // 轉換為股數
+
+            Console.WriteLine($"[SIGNAL] {kline.Symbol} ADX={result.Adx:F1} BB={result.BbLower:F2} RSI={result.Rsi:F1} Close={kline.Close} 買進{lots}張({qtyShares}股)");
             _pendingFillPrice[kline.Symbol] = kline.Close;
             if (kline.PreviousClose.HasValue)
                 _pendingPreviousClose[kline.Symbol] = kline.PreviousClose.Value;
-            await _broker.PlaceMarketBuyAsync(kline.Symbol, DefaultQty);
+            await _broker.PlaceMarketBuyAsync(kline.Symbol, qtyShares);
         }
     }
 
     // Mock 環境用：暫存預期成交價 & 前收盤
     private readonly Dictionary<string, decimal> _pendingFillPrice = new();
     private readonly Dictionary<string, decimal> _pendingPreviousClose = new();
+
+    // 最新指標快照（供 debug 查詢）
+    private readonly Dictionary<string, IndicatorSnapshot> _lastIndicators = new();
+    public IReadOnlyDictionary<string, IndicatorSnapshot> LastIndicators => _lastIndicators;
 
     private void HandleTradeReport(object? sender, TradeReport report)
     {
@@ -145,6 +179,18 @@ public class StrategyBrain
         }
     }
 
-    public static decimal CalculateTakeProfit(decimal fillPrice) => Math.Round(fillPrice * 1.005m, 2);
-    public static decimal CalculateStopLoss(decimal fillPrice) => Math.Round(fillPrice * 0.990m, 2);
+    public decimal CalculateTakeProfit(decimal fillPrice) => Math.Round(fillPrice * (1 + Config.TakeProfitPct), 2);
+    public decimal CalculateStopLoss(decimal fillPrice)   => Math.Round(fillPrice * (1 - Config.StopLossPct),   2);
 }
+
+public record IndicatorSnapshot(
+    string   Symbol,
+    decimal  Close,
+    DateTime Time,
+    double?  Adx,
+    double?  BbLower,
+    double?  Rsi,
+    bool     AdxOk,
+    bool     BbOk,
+    bool     RsiOk
+);

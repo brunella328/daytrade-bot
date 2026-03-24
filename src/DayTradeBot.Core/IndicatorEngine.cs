@@ -11,7 +11,11 @@ public record IndicatorResult(
 
 public class IndicatorEngine
 {
-    private const int MinRequiredBars = 30;
+    // P3-2：MinRequiredBars 降為 15，讓重啟後約 15 分鐘就能通過 null guard 進入指標計算。
+    // 注意：BB(20) 需要至少 20 根才能產生有效 LowerBand；第 15-19 根期間 bb 仍為 null，
+    // UseBbCondition=true 時 bbOk=false，Triple Confirmation 不會觸發進場，行為正確。
+    // 實際進場最早仍需等 BB 有值（第 20 根），但避免了不必要的 early-exit overhead。
+    private const int MinRequiredBars = 15;
 
     /// <summary>
     /// 從 K線陣列計算最新一根的 ADX(14)、BB(20,2) LowerBand、RSI(14)。

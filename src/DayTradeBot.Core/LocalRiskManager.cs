@@ -52,13 +52,14 @@ public class LocalRiskManager
     /// </summary>
     public void OnTick(object? sender, TickData tick)
     {
+        ManagedPosition? exitPos = null;
+        string? exitReason = null;
+
         lock (_lock)
         {
             _latestPrices[tick.Symbol] = tick.Price;
 
             if (!_positions.TryGetValue(tick.Symbol, out var pos)) return;
-
-            string? exitReason = null;
 
             if (tick.Price >= pos.TakeProfitPrice)
                 exitReason = "TP";
@@ -66,32 +67,53 @@ public class LocalRiskManager
                 exitReason = "SL";
 
             if (exitReason is not null)
-                TriggerExit(pos, tick.Price, exitReason);
+            {
+                _positions.Remove(pos.Symbol);
+                exitPos = pos;
+            }
+        }
+
+        if (exitPos is not null)
+        {
+            Console.WriteLine($"[RiskManager] {exitReason} 觸發 {exitPos.Symbol} @ {tick.Price}");
+            _ = PlaceSellAndNotifyAsync(exitPos, tick.Price, exitReason!);
         }
     }
 
     /// <summary>強制平倉所有部位（13:00 收盤用）</summary>
     public void ForceCloseAll()
     {
+        var exits = new List<(ManagedPosition pos, decimal price)>();
+
         lock (_lock)
         {
             foreach (var pos in _positions.Values.ToList())
             {
                 var price = _latestPrices.TryGetValue(pos.Symbol, out var p) ? p : pos.FillPrice;
-                TriggerExit(pos, price, "ForceClose");
+                exits.Add((pos, price));
             }
+            _positions.Clear();
+        }
+
+        foreach (var (pos, price) in exits)
+        {
+            Console.WriteLine($"[RiskManager] ForceClose 觸發 {pos.Symbol} @ {price}");
+            _ = PlaceSellAndNotifyAsync(pos, price, "ForceClose");
         }
     }
 
-    private void TriggerExit(ManagedPosition pos, decimal exitPrice, string reason)
+    private async Task PlaceSellAndNotifyAsync(ManagedPosition pos, decimal exitPrice, string reason)
     {
-        _positions.Remove(pos.Symbol);
-        Console.WriteLine($"[RiskManager] {reason} 觸發 {pos.Symbol} @ {exitPrice}");
+        try
+        {
+            await _broker.PlaceMarketSellAsync(pos.Symbol, pos.Qty);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[RiskManager] ⚠️ 賣單失敗 {pos.Symbol}: {ex.Message}，部位可能殘留，請手動確認");
+            return;
+        }
 
-        // 送市價賣單（fire-and-forget）
-        _ = _broker.PlaceMarketSellAsync(pos.Symbol, pos.Qty);
-
-        // 通知 TradingEngine 寫 DB
         OnPositionExited?.Invoke(this, new PositionExitArgs(
             pos.Symbol, pos.FillPrice, exitPrice, pos.Qty, pos.EntryTime, reason));
     }
@@ -107,6 +129,16 @@ public class LocalRiskManager
         {
             return _latestPrices.TryGetValue(symbol, out var p) ? p : null;
         }
+    }
+
+    public IReadOnlyList<ManagedPosition> GetPositions()
+    {
+        lock (_lock) { return _positions.Values.ToList(); }
+    }
+
+    public IReadOnlyDictionary<string, decimal> GetLatestPrices()
+    {
+        lock (_lock) { return new Dictionary<string, decimal>(_latestPrices); }
     }
 }
 

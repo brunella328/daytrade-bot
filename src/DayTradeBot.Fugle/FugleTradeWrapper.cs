@@ -90,18 +90,19 @@ public class FugleTradeWrapper : IBrokerApi
 
     /// <summary>
     /// 平倉市價賣出（供 LocalRiskManager 呼叫）。
+    /// 委託條件：IOC（立即成交否則取消），防止停損單懸掛成未成交 ROD。
     /// </summary>
     public async Task<string> PlaceMarketSellAsync(string symbol, long qty)
     {
         var payload = new FugleOrderRequest
         {
-            StockNo = symbol,
-            BuySell = "S",
+            StockNo   = symbol,
+            BuySell   = "S",
             TradeType = "0",
-            PriceFlag = "4",
-            Price = "0",
-            Quantity = (int)qty,
-            ApCode = "1",
+            PriceFlag = "4",   // 4 = 市價
+            Price     = "0",
+            Quantity  = (int)qty,
+            ApCode    = "2",   // 2 = IOC（Immediate or Cancel）
             TradeDate = DateTime.Now.ToString("yyyyMMdd")
         };
 

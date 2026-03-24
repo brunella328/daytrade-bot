@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>模擬交易後台 — 當沖 Bot</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 24px; }
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; }
+    h2 { font-size: 1rem; font-weight: 600; color: #a0aec0; margin-bottom: 14px; }
+    .nav { margin-bottom: 24px; font-size: 0.875rem; }
+    .nav a { color: #63b3ed; text-decoration: none; margin-right: 16px; }
+    .subtitle { color: #718096; font-size: 0.85rem; margin-bottom: 28px; }
+
+    /* 本金設定 */
+    .config-card { background: #1a1d27; border: 1px solid #2d3748; border-radius: 12px; padding: 20px 24px; margin-bottom: 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .config-card label { font-size: 0.875rem; color: #a0aec0; }
+    .capital-input { background: #0f1117; border: 1px solid #4a5568; color: #e2e8f0; padding: 8px 14px; border-radius: 8px; font-size: 1rem; width: 180px; }
+    .capital-input:focus { outline: none; border-color: #63b3ed; }
+    .btn-reset { background: #3182ce; color: #fff; border: none; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
+    .btn-reset:hover { background: #2b6cb0; }
+    .mode-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; }
+    .mode-papertrade { background: #553c9a; color: #e9d8fd; }
+    .mode-dryrun { background: #2d3748; color: #a0aec0; }
+    .mode-live { background: #276749; color: #c6f6d5; }
+
+    /* 帳戶快照 */
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; margin-bottom: 28px; }
+    .card { background: #1a1d27; border: 1px solid #2d3748; border-radius: 12px; padding: 18px 20px; }
+    .card-label { font-size: 0.7rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+    .card-value { font-size: 1.6rem; font-weight: 700; }
+    .positive { color: #48bb78; }
+    .negative { color: #fc8181; }
+    .neutral  { color: #e2e8f0; }
+    .accent   { color: #63b3ed; }
+
+    /* 表格 */
+    .section { margin-bottom: 32px; }
+    table { width: 100%; border-collapse: collapse; background: #1a1d27; border-radius: 12px; overflow: hidden; border: 1px solid #2d3748; }
+    thead { background: #2d3748; }
+    th { padding: 10px 14px; text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #a0aec0; }
+    td { padding: 10px 14px; font-size: 0.85rem; border-top: 1px solid #1e2330; }
+    tr:hover td { background: #1e2330; }
+    .empty { text-align: center; padding: 36px; color: #4a5568; }
+    .tag-tp    { color: #48bb78; font-weight: 700; }
+    .tag-sl    { color: #fc8181; font-weight: 700; }
+    .tag-force { color: #f6ad55; font-weight: 700; }
+
+    .refresh-info { font-size: 0.75rem; color: #4a5568; margin-top: 10px; text-align: right; }
+    .param-field { display:flex; flex-direction:column; gap:6px; font-size:0.8rem; color:#a0aec0; }
+    .param-field input[type="number"] { background:#0f1117; border:1px solid #4a5568; color:#e2e8f0; padding:7px 10px; border-radius:6px; font-size:0.95rem; }
+    .param-field input:focus { outline:none; border-color:#63b3ed; }
+    .progress-bar-wrap { background: #2d3748; border-radius: 999px; height: 6px; margin-top: 6px; overflow: hidden; }
+    .progress-bar { height: 6px; border-radius: 999px; transition: width 0.5s; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/">交易紀錄</a>
+    <a href="/rawdata.html">原始行情</a>
+    <a href="/paper.html">模擬後台</a>
+  </div>
+
+  <h1>模擬交易後台</h1>
+  <p class="subtitle" id="last-update">載入中...</p>
+
+  <!-- 本金設定 -->
+  <div class="config-card">
+    <div>
+      <div style="font-size:0.75rem;color:#718096;margin-bottom:4px;">模式</div>
+      <span class="mode-badge" id="mode-badge">—</span>
+    </div>
+    <div style="flex:1"></div>
+    <label>初始本金（元）</label>
+    <input class="capital-input" id="capital-input" type="number" step="10000" min="10000" value="1000000" />
+    <button class="btn-reset" onclick="resetPortfolio()">套用重設</button>
+  </div>
+
+  <!-- 今日標的 -->
+  <div style="background:#1a1d27;border:1px solid #2d3748;border-radius:12px;padding:20px 24px;margin-bottom:28px;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <h2 style="margin:0;">今日選股標的</h2>
+      <span id="wl-updated" style="font-size:0.75rem;color:#718096;"></span>
+      <button class="btn-reset" style="margin-left:auto;" onclick="refreshWatchlist()">立即選股</button>
+      <span id="wl-status" style="font-size:0.8rem;color:#48bb78;"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>順序</th><th>代號</th><th>股名</th><th>收盤</th>
+          <th>成交量（張）</th><th>振幅%</th><th>RSI</th><th>評分</th><th>理由</th>
+        </tr>
+      </thead>
+      <tbody id="wl-body">
+        <tr><td colspan="9" class="empty">載入中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 策略設定 -->
+  <div style="background:#1a1d27;border:1px solid #2d3748;border-radius:12px;padding:20px 24px;margin-bottom:28px;">
+    <h2 style="margin-bottom:16px;">策略參數</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px;">
+      <label class="param-field">
+        <span>ADX 門檻（&lt; X 才進場）</span>
+        <input type="number" id="cfg-adx" step="1" min="10" max="50" />
+      </label>
+      <label class="param-field">
+        <span>RSI 門檻（&lt; X 才進場）</span>
+        <input type="number" id="cfg-rsi" step="1" min="10" max="70" />
+      </label>
+      <label class="param-field">
+        <span>停利 %（0.5 = 0.5%）</span>
+        <input type="number" id="cfg-tp" step="0.1" min="0.1" max="10" />
+      </label>
+      <label class="param-field">
+        <span>停損 %（1.0 = 1.0%）</span>
+        <input type="number" id="cfg-sl" step="0.1" min="0.1" max="10" />
+      </label>
+      <label class="param-field">
+        <span>進場開始（時，24h）</span>
+        <input type="number" id="cfg-start" step="0.5" min="9" max="12" />
+      </label>
+      <label class="param-field">
+        <span>進場截止（時，24h）</span>
+        <input type="number" id="cfg-end" step="0.5" min="10" max="13" />
+      </label>
+      <label class="param-field">
+        <span>總資金（元）</span>
+        <input type="number" id="cfg-capital" step="100000" min="100000" />
+      </label>
+      <label class="param-field">
+        <span>單筆上限 %（20 = 20%）</span>
+        <input type="number" id="cfg-pos-pct" step="5" min="5" max="50" />
+      </label>
+      <label class="param-field">
+        <span>🚨 深水區禁區（跌幅 % 門檻，預設 7）</span>
+        <input type="number" id="cfg-redzone" step="1" min="3" max="10" />
+      </label>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;">
+      <label style="display:flex;align-items:center;gap:8px;font-size:0.875rem;color:#a0aec0;cursor:pointer;">
+        <input type="checkbox" id="cfg-bb" style="width:16px;height:16px;" />
+        啟用 BB 下軌條件
+      </label>
+      <button class="btn-reset" onclick="saveStrategyConfig()">套用策略</button>
+      <span id="cfg-status" style="font-size:0.8rem;color:#48bb78;"></span>
+    </div>
+  </div>
+
+  <!-- 今日回測 -->
+  <div id="bt-section" style="background:#1a1d27;border:1px solid #553c9a;border-radius:12px;padding:20px 24px;margin-bottom:28px;">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+      <h2 style="margin:0;">今日 Tick 回測</h2>
+      <span style="font-size:0.75rem;color:#718096;">以目前策略參數重跑今日已收集的 Tick 資料</span>
+      <button class="btn-reset" style="margin-left:auto;background:#553c9a;" onclick="runBacktest()">執行回測</button>
+      <span id="bt-status" style="font-size:0.8rem;color:#a0aec0;"></span>
+    </div>
+
+    <!-- 回測摘要 -->
+    <div id="bt-summary" style="display:none;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px;">
+        <div class="card" style="padding:14px 16px;">
+          <div class="card-label">Tick 數量</div>
+          <div class="card-value accent" id="bt-ticks" style="font-size:1.3rem;">—</div>
+        </div>
+        <div class="card" style="padding:14px 16px;">
+          <div class="card-label">交易筆數</div>
+          <div class="card-value neutral" id="bt-trades" style="font-size:1.3rem;">—</div>
+        </div>
+        <div class="card" style="padding:14px 16px;">
+          <div class="card-label">勝率</div>
+          <div class="card-value neutral" id="bt-winrate" style="font-size:1.3rem;">—</div>
+        </div>
+        <div class="card" style="padding:14px 16px;">
+          <div class="card-label">模擬淨損益</div>
+          <div class="card-value neutral" id="bt-pnl" style="font-size:1.3rem;">—</div>
+        </div>
+        <div class="card" style="padding:14px 16px;">
+          <div class="card-label">深水區攔截</div>
+          <div class="card-value" id="bt-redzone" style="font-size:1.3rem;color:#fc8181;">—</div>
+        </div>
+      </div>
+
+      <!-- 深水區攔截詳情 -->
+      <div id="bt-redzone-detail" style="display:none;margin-bottom:14px;">
+        <div style="font-size:0.8rem;color:#fc8181;margin-bottom:8px;">🚨 深水區攔截紀錄（已阻止進場）</div>
+        <table>
+          <thead><tr><th>時間</th><th>代號</th><th>收盤</th><th>昨收</th><th>跌幅%</th></tr></thead>
+          <tbody id="bt-redzone-body"></tbody>
+        </table>
+      </div>
+
+      <!-- 回測交易明細 -->
+      <div id="bt-trades-detail" style="display:none;">
+        <div style="font-size:0.8rem;color:#a0aec0;margin-bottom:8px;">回測模擬交易明細</div>
+        <table>
+          <thead><tr><th>代號</th><th>進場價</th><th>出場價</th><th>張數</th><th>毛利</th><th>手續費</th><th>稅</th><th>淨損益</th><th>原因</th></tr></thead>
+          <tbody id="bt-trades-body"></tbody>
+        </table>
+      </div>
+      <div id="bt-no-trades" style="display:none;color:#4a5568;font-size:0.85rem;padding:16px 0;">此區間 Tick 不足以觸發任何交易訊號（需至少 30 根 K 線）</div>
+    </div>
+  </div>
+
+  <!-- 帳戶快照 -->
+  <div class="stats">
+    <div class="card">
+      <div class="card-label">初始本金</div>
+      <div class="card-value accent" id="s-initial">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">可用現金</div>
+      <div class="card-value neutral" id="s-cash">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">持倉市值</div>
+      <div class="card-value neutral" id="s-pos-val">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">帳戶總值</div>
+      <div class="card-value neutral" id="s-total">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">已實現損益</div>
+      <div class="card-value neutral" id="s-realized">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">未實現損益</div>
+      <div class="card-value neutral" id="s-unrealized">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">今日總損益</div>
+      <div class="card-value neutral" id="s-total-pnl">—</div>
+      <div class="progress-bar-wrap" id="pnl-bar-wrap" style="display:none">
+        <div class="progress-bar" id="pnl-bar"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-label">交易次數 / 勝率</div>
+      <div class="card-value neutral" id="s-trades">—</div>
+    </div>
+  </div>
+
+  <!-- 指標狀態 -->
+  <div class="section">
+    <h2>策略指標（最新 K 線）</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>標的</th>
+          <th>收盤價</th>
+          <th>ADX <small style="color:#718096">(&lt;25✓)</small></th>
+          <th>BB 下軌</th>
+          <th>RSI <small style="color:#718096">(&lt;30✓)</small></th>
+          <th>Close&lt;BBLower</th>
+          <th>信號</th>
+          <th>時間</th>
+        </tr>
+      </thead>
+      <tbody id="indicators-body">
+        <tr><td colspan="8" class="empty">等待 K 線（約開盤後 30 分鐘）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 持倉中 -->
+  <div class="section">
+    <h2>持倉中</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>標的</th>
+          <th>進場價</th>
+          <th>現價</th>
+          <th>數量</th>
+          <th>市值</th>
+          <th>未實現損益</th>
+          <th>停利價</th>
+          <th>停損價</th>
+          <th>進場時間</th>
+        </tr>
+      </thead>
+      <tbody id="positions-body">
+        <tr><td colspan="9" class="empty">目前無持倉</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 今日交易紀錄 -->
+  <div class="section">
+    <h2>今日交易紀錄</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>標的</th>
+          <th>進場價</th>
+          <th>出場價</th>
+          <th>數量</th>
+          <th>稅前損益</th>
+          <th>手續費+稅</th>
+          <th>淨損益</th>
+          <th>原因</th>
+          <th>出場時間</th>
+        </tr>
+      </thead>
+      <tbody id="trades-body">
+        <tr><td colspan="9" class="empty">尚無成交紀錄</td></tr>
+      </tbody>
+    </table>
+    <p class="refresh-info">每 3 秒自動更新</p>
+  </div>
+
+  <script>
+    const fmt = (n, digits=0) => Number(n).toLocaleString('zh-TW', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    const pnlClass = n => n > 0 ? 'positive' : n < 0 ? 'negative' : 'neutral';
+    const pnlStr  = (n, digits=0) => (n >= 0 ? '+' : '') + fmt(n, digits);
+
+    function fmtTime(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return d.toLocaleTimeString('zh-TW', { hour12: false });
+    }
+
+    async function load() {
+      try {
+        const [pRes, hRes, tRes, iRes] = await Promise.all([
+          fetch('/api/portfolio'),
+          fetch('/api/health'),
+          fetch('/api/trades'),
+          fetch('/api/debug/indicators')
+        ]);
+        const p = await pRes.json();
+        const h = await hRes.json();
+        const trades = await tRes.json();
+        const indicators = await iRes.json();
+
+        // 模式 badge
+        const badge = document.getElementById('mode-badge');
+        badge.textContent = h.mode;
+        badge.className = 'mode-badge mode-' + h.mode.toLowerCase();
+
+        // 本金輸入預填
+        if (!capitalInitialized) {
+          document.getElementById('capital-input').value = p.initialCapital;
+          capitalInitialized = true;
+        }
+
+        // 快照卡片
+        document.getElementById('s-initial').textContent   = fmt(p.initialCapital);
+        document.getElementById('s-cash').textContent      = fmt(p.cash);
+        document.getElementById('s-pos-val').textContent   = fmt(p.positionValue);
+        document.getElementById('s-total').textContent     = fmt(p.totalValue);
+
+        setCard('s-realized',   p.realizedPnL);
+        setCard('s-unrealized', p.unrealizedPnL);
+        setCard('s-total-pnl',  p.totalPnL);
+
+        const pnlPct = p.initialCapital > 0 ? p.totalPnL / p.initialCapital : 0;
+        const bar = document.getElementById('pnl-bar');
+        const barWrap = document.getElementById('pnl-bar-wrap');
+        barWrap.style.display = '';
+        bar.style.width = Math.min(Math.abs(pnlPct) * 100 * 10, 100) + '%';
+        bar.style.background = p.totalPnL >= 0 ? '#48bb78' : '#fc8181';
+
+        const tradeEl = document.getElementById('s-trades');
+        tradeEl.textContent = `${p.totalTrades} / ${(p.winRate * 100).toFixed(1)}%`;
+        tradeEl.className = 'card-value neutral';
+
+        // 持倉表
+        const posBody = document.getElementById('positions-body');
+        if (!p.openPositions || p.openPositions.length === 0) {
+          posBody.innerHTML = '<tr><td colspan="9" class="empty">目前無持倉</td></tr>';
+        } else {
+          posBody.innerHTML = p.openPositions.map(pos => `
+            <tr>
+              <td><strong>${pos.symbol}</strong></td>
+              <td>${pos.entryPrice.toFixed(2)}</td>
+              <td>${pos.latestPrice.toFixed(2)}</td>
+              <td>${pos.qty}</td>
+              <td>${fmt(pos.marketValue)}</td>
+              <td class="${pnlClass(pos.unrealizedPnL)}">${pnlStr(pos.unrealizedPnL)}</td>
+              <td class="tag-tp">${pos.takeProfitPrice.toFixed(2)}</td>
+              <td class="tag-sl">${pos.stopLossPrice.toFixed(2)}</td>
+              <td>${fmtTime(pos.entryTime)}</td>
+            </tr>`).join('');
+        }
+
+        // 今日交易（只顯示今天）
+        const today = new Date().toLocaleDateString('zh-TW');
+        const todayTrades = (trades || []).filter(t =>
+          new Date(t.exitTime).toLocaleDateString('zh-TW') === today
+        );
+        const tBody = document.getElementById('trades-body');
+        if (todayTrades.length === 0) {
+          tBody.innerHTML = '<tr><td colspan="9" class="empty">尚無成交紀錄</td></tr>';
+        } else {
+          tBody.innerHTML = todayTrades.map(t => {
+            const gross = t.grossPnL ?? 0;
+            const cost  = (t.commission ?? 0) + (t.tax ?? 0);
+            const net   = t.netPnL ?? 0;
+            const tag   = t.exitReason === 'TP' ? 'tp' : t.exitReason === 'SL' ? 'sl' : 'force';
+            return `<tr>
+              <td><strong>${t.symbol}</strong></td>
+              <td>${t.entryPrice.toFixed(2)}</td>
+              <td>${t.exitPrice.toFixed(2)}</td>
+              <td>${t.qty}</td>
+              <td class="${pnlClass(gross)}">${pnlStr(gross)}</td>
+              <td class="negative">-${cost.toFixed(2)}</td>
+              <td class="${pnlClass(net)}">${pnlStr(net)}</td>
+              <td class="tag-${tag}">${t.exitReason}</td>
+              <td>${fmtTime(t.exitTime)}</td>
+            </tr>`;
+          }).join('');
+        }
+
+        // 指標表
+        const iBody = document.getElementById('indicators-body');
+        if (!indicators || indicators.length === 0) {
+          iBody.innerHTML = '<tr><td colspan="8" class="empty">等待 K 線（約開盤後 30 分鐘）</td></tr>';
+        } else {
+          iBody.innerHTML = indicators.map(r => {
+            const allOk = r.adxOk && r.bbOk && r.rsiOk;
+            const tick = v => v != null ? v.toFixed(2) : '—';
+            return `<tr style="${allOk ? 'background:#1a3a2a' : ''}">
+              <td><strong>${r.symbol}</strong></td>
+              <td>${r.close.toFixed(2)}</td>
+              <td class="${r.adxOk ? 'positive' : 'neutral'}">${tick(r.adx)}</td>
+              <td>${tick(r.bbLower)}</td>
+              <td class="${r.rsiOk ? 'positive' : (r.rsi != null && r.rsi < 50 ? 'neutral' : 'negative')}">${tick(r.rsi)}</td>
+              <td class="${r.bbOk ? 'positive' : 'neutral'}">${r.bbOk ? '✓' : '✗'}</td>
+              <td>${allOk ? '🚨 進場' : [r.adxOk?'ADX✓':'ADX✗', r.bbOk?'BB✓':'BB✗', r.rsiOk?'RSI✓':'RSI✗'].join(' ')}</td>
+              <td class="time">${fmtTime(r.time)}</td>
+            </tr>`;
+          }).join('');
+        }
+
+        document.getElementById('last-update').textContent =
+          '最後更新：' + new Date().toLocaleTimeString('zh-TW');
+      } catch (e) {
+        document.getElementById('last-update').textContent = '無法連線到後端';
+      }
+    }
+
+    function setCard(id, val) {
+      const el = document.getElementById(id);
+      el.textContent = pnlStr(val);
+      el.className = 'card-value ' + pnlClass(val);
+    }
+
+    async function resetPortfolio() {
+      const capital = Number(document.getElementById('capital-input').value);
+      if (capital <= 0) { alert('請輸入有效本金'); return; }
+      const res = await fetch('/api/portfolio/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ capital })
+      });
+      if (res.ok) await load();
+    }
+
+    let capitalInitialized = false;
+    let strategyInitialized = false;
+
+    async function loadStrategyConfig() {
+      if (strategyInitialized) return;
+      const res = await fetch('/api/strategy/config');
+      if (!res.ok) return;
+      const c = await res.json();
+      document.getElementById('cfg-adx').value   = c.adxThreshold;
+      document.getElementById('cfg-rsi').value   = c.rsiThreshold;
+      document.getElementById('cfg-tp').value    = +(c.takeProfitPct * 100).toFixed(2);
+      document.getElementById('cfg-sl').value    = +(c.stopLossPct   * 100).toFixed(2);
+      document.getElementById('cfg-start').value = c.entryStartHour;
+      document.getElementById('cfg-end').value     = c.entryEndHour;
+      document.getElementById('cfg-bb').checked    = c.useBbCondition;
+      if (c.totalCapital     != null) document.getElementById('cfg-capital').value  = c.totalCapital;
+      if (c.maxPositionPct   != null) document.getElementById('cfg-pos-pct').value  = +(c.maxPositionPct * 100).toFixed(0);
+      if (c.redZoneThreshold != null) document.getElementById('cfg-redzone').value  = +(c.redZoneThreshold * 100).toFixed(0);
+      strategyInitialized = true;
+    }
+
+    async function saveStrategyConfig() {
+      const body = {
+        adxThreshold:   +document.getElementById('cfg-adx').value,
+        rsiThreshold:   +document.getElementById('cfg-rsi').value,
+        takeProfitPct:  +document.getElementById('cfg-tp').value / 100,
+        stopLossPct:    +document.getElementById('cfg-sl').value / 100,
+        entryStartHour: +document.getElementById('cfg-start').value,
+        entryEndHour:   +document.getElementById('cfg-end').value,
+        forceCloseHour: +document.getElementById('cfg-end').value + 0.5,
+        useBbCondition: document.getElementById('cfg-bb').checked,
+        totalCapital:      +document.getElementById('cfg-capital').value,
+        maxPositionPct:    +document.getElementById('cfg-pos-pct').value / 100,
+        redZoneThreshold:  +document.getElementById('cfg-redzone').value / 100
+      };
+      const res = await fetch('/api/strategy/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const st = document.getElementById('cfg-status');
+      if (res.ok) {
+        st.textContent = '✓ 已套用';
+        st.style.color = '#48bb78';
+        setTimeout(() => st.textContent = '', 3000);
+      } else {
+        st.textContent = '✗ 失敗';
+        st.style.color = '#fc8181';
+      }
+    }
+
+    async function loadWatchlist() {
+      try {
+        const res = await fetch('/api/watchlist');
+        const wl  = await res.json();
+        document.getElementById('wl-updated').textContent =
+          wl.lastRunAt ? '上次選股：' + fmtTime(wl.lastRunAt) : '（尚未執行選股）';
+
+        const tbody = document.getElementById('wl-body');
+        if (!wl.lastResults || wl.lastResults.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="9" class="empty">
+            目前使用靜態清單：${wl.symbols.join('、')}<br>
+            <small style="color:#4a5568">點「立即選股」執行選股，或等明天 08:30 自動更新</small>
+          </td></tr>`;
+        } else {
+          tbody.innerHTML = wl.lastResults.map((r, i) => `
+            <tr>
+              <td>${i + 1}</td>
+              <td><strong>${r.symbol}</strong></td>
+              <td>${r.name}</td>
+              <td>${r.close.toFixed(2)}</td>
+              <td>${r.volume.toLocaleString()}</td>
+              <td>${r.rangePct.toFixed(1)}%</td>
+              <td class="${r.rsi != null && r.rsi < 45 ? 'positive' : 'neutral'}">${r.rsi != null ? r.rsi.toFixed(1) : '—'}</td>
+              <td><strong>${r.score.toFixed(2)}</strong></td>
+              <td style="font-size:0.75rem;color:#718096">${r.reason}</td>
+            </tr>`).join('');
+        }
+      } catch(e) {}
+    }
+
+    async function refreshWatchlist() {
+      const st = document.getElementById('wl-status');
+      st.textContent = '選股中...';
+      st.style.color = '#f6ad55';
+      try {
+        const res = await fetch('/api/watchlist/refresh', { method: 'POST' });
+        if (res.ok) {
+          st.textContent = '✓ 完成';
+          st.style.color = '#48bb78';
+          await loadWatchlist();
+        } else {
+          const err = await res.json();
+          st.textContent = '✗ ' + (err.error || '失敗');
+          st.style.color = '#fc8181';
+        }
+      } catch(e) {
+        st.textContent = '✗ 連線失敗';
+        st.style.color = '#fc8181';
+      }
+      setTimeout(() => st.textContent = '', 5000);
+    }
+
+    async function runBacktest() {
+      const st = document.getElementById('bt-status');
+      st.textContent = '回測執行中...';
+      st.style.color = '#f6ad55';
+      try {
+        const res = await fetch('/api/backtest', { method: 'POST' });
+        if (!res.ok) {
+          const err = await res.json();
+          st.textContent = '✗ ' + (err.error || '失敗');
+          st.style.color = '#fc8181';
+          return;
+        }
+        const r = await res.json();
+        st.textContent = `✓ 完成（${r.tickCount} ticks，${new Date(r.runAt).toLocaleTimeString('zh-TW')}）`;
+        st.style.color = '#48bb78';
+
+        // 摘要
+        document.getElementById('bt-summary').style.display = 'block';
+        document.getElementById('bt-ticks').textContent   = r.tickCount.toLocaleString();
+        document.getElementById('bt-trades').textContent  = r.totalTrades;
+        document.getElementById('bt-winrate').textContent = r.totalTrades > 0
+          ? (r.winRate * 100).toFixed(1) + '%' : 'N/A';
+
+        const pnlEl = document.getElementById('bt-pnl');
+        pnlEl.textContent = pnlStr(r.totalNetPnL);
+        pnlEl.className   = 'card-value ' + pnlClass(r.totalNetPnL);
+
+        const rzEl = document.getElementById('bt-redzone');
+        rzEl.textContent = r.redZoneHits.length + ' 次';
+
+        // 深水區攔截
+        const rzDetail = document.getElementById('bt-redzone-detail');
+        if (r.redZoneHits.length > 0) {
+          rzDetail.style.display = 'block';
+          document.getElementById('bt-redzone-body').innerHTML =
+            r.redZoneHits.map(h => `<tr>
+              <td>${new Date(h.time).toLocaleTimeString('zh-TW')}</td>
+              <td>${h.symbol}</td>
+              <td>${h.close.toFixed(2)}</td>
+              <td>${h.previousClose.toFixed(2)}</td>
+              <td style="color:#fc8181;font-weight:700;">${h.dropPct.toFixed(2)}%</td>
+            </tr>`).join('');
+        } else {
+          rzDetail.style.display = 'none';
+        }
+
+        // 交易明細
+        if (r.trades.length > 0) {
+          document.getElementById('bt-trades-detail').style.display = 'block';
+          document.getElementById('bt-no-trades').style.display = 'none';
+          document.getElementById('bt-trades-body').innerHTML =
+            r.trades.map(t => {
+              const pnl = t.netPnL;
+              const cls = pnl >= 0 ? 'tag-tp' : 'tag-sl';
+              return `<tr>
+                <td>${t.symbol}</td>
+                <td>${t.entryPrice.toFixed(2)}</td>
+                <td>${t.exitPrice.toFixed(2)}</td>
+                <td>${(t.qty / 1000).toFixed(0)}</td>
+                <td>${pnlStr(t.grossPnL)}</td>
+                <td>${fmt(t.commission)}</td>
+                <td>${fmt(t.tax)}</td>
+                <td class="${cls}">${pnlStr(pnl)}</td>
+                <td class="${t.exitReason === 'TP' ? 'tag-tp' : t.exitReason === 'SL' ? 'tag-sl' : 'tag-force'}">${t.exitReason}</td>
+              </tr>`;
+            }).join('');
+        } else {
+          document.getElementById('bt-trades-detail').style.display = 'none';
+          document.getElementById('bt-no-trades').style.display = 'block';
+        }
+      } catch(e) {
+        st.textContent = '✗ ' + (e.message || '連線失敗');
+        st.style.color = '#fc8181';
+        console.error('[backtest]', e);
+      }
+    }
+
+    loadStrategyConfig();
+    loadWatchlist();
+    load();
+    setInterval(load, 3000);
+    setInterval(loadWatchlist, 60000);
+  </script>
+</body>
+</html>

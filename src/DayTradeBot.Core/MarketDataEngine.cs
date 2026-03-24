@@ -10,12 +10,30 @@ namespace DayTradeBot.Core;
 public class MarketDataEngine
 {
     public event EventHandler<KLine>? OnKLineClosed;
+    public event EventHandler<TickData>? OnTickEnqueued;
 
     private readonly ConcurrentQueue<TickData> _tickQueue = new();
     private readonly Dictionary<string, KLine> _openCandles = new();
+    private readonly Dictionary<string, decimal> _referencePrices = new();
     private CancellationToken _ct;
 
-    public void EnqueueTick(TickData tick) => _tickQueue.Enqueue(tick);
+    // ── 參考價（昨日收盤）管理 ─────────────────────────────────────────────
+
+    /// <summary>設定標的的參考價（昨日收盤），供 FugleMarketDataWrapper 在訂閱後呼叫。</summary>
+    public void SetReferencePrice(string symbol, decimal price)
+    {
+        if (price > 0) _referencePrices[symbol] = price;
+    }
+
+    /// <summary>取得標的的參考價，若尚未設定則回傳 null。</summary>
+    public decimal? GetReferencePrice(string symbol) =>
+        _referencePrices.TryGetValue(symbol, out var p) ? p : null;
+
+    public void EnqueueTick(TickData tick)
+    {
+        _tickQueue.Enqueue(tick);
+        OnTickEnqueued?.Invoke(this, tick);
+    }
 
     /// <summary>啟動消費者 loop，直到 cancellationToken 取消</summary>
     public Task StartAsync(CancellationToken cancellationToken)
@@ -75,15 +93,16 @@ public class MarketDataEngine
         }
     }
 
-    private static KLine NewCandle(TickData tick, DateTime minuteStart) => new()
+    private KLine NewCandle(TickData tick, DateTime minuteStart) => new()
     {
-        Symbol = tick.Symbol,
-        Open = tick.Price,
-        High = tick.Price,
-        Low = tick.Price,
-        Close = tick.Price,
-        Volume = tick.Volume,
-        OpenTime = minuteStart
+        Symbol        = tick.Symbol,
+        Open          = tick.Price,
+        High          = tick.Price,
+        Low           = tick.Price,
+        Close         = tick.Price,
+        Volume        = tick.Volume,
+        OpenTime      = minuteStart,
+        PreviousClose = _referencePrices.TryGetValue(tick.Symbol, out var refP) ? refP : null
     };
 
     /// <summary>強制結算所有未收盤的 K線（用於收盤強制平倉前）</summary>
