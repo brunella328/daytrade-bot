@@ -31,6 +31,9 @@ public class TradingEngine : BackgroundService
         _market.OnKLineClosed += async (s, kline) =>
             await _brain.OnKLineClosedAsync(s, kline);
 
+        // Tick 更新 → LocalRiskManager 即時檢核止盈止損
+        _market.OnTickEnqueued += _riskMgr.OnTick;
+
         // 進場成交 → LocalRiskManager 登記部位
         _brain.OnPositionOpened += (_, order) =>
         {
@@ -65,6 +68,7 @@ public class TradingEngine : BackgroundService
                 ExitReason = e.Reason
             });
             _logger.LogInformation("[TRADE] {Symbol} {Reason} net={Net}", e.Symbol, e.Reason, netPnl);
+            _brain.NotifyPositionClosed(e.Symbol, e.ExitPrice, e.Reason);
         };
     }
 
